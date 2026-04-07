@@ -1,0 +1,262 @@
+---
+title: '6.2-3'
+author: "박도연"
+date: "2025-11-13"
+output: html_document
+---
+# 6.2
+## 목적
+어떤 지리적 요인(섬의 면적, 고도, 고립 정도 등등)이 갈라파고스 섬의 생물 다양성(총 종의 수)과 고유종의 비율(Endemism)을 가장 잘 설명하는가?
+
+```{r}
+getwd()
+setwd("C:/Users/user/Documents/R_DA")
+library(readxl)
+library(car)
+library(corrplot)
+
+data <- read_excel("table6.1_galapagos.xlsx") 
+data
+```
+
+### 데이터 확인
+```{r}
+str(data)
+head(data)
+summary(data)
+data$E_Ratio <- data$Endemics / data$Species # 변수 추가(고유종 비율)
+head(data)
+```
+
+### 데이터 분포 확인
+```{r}
+par(mfrow = c(3, 3))
+
+hist(data$Species, main = "Species", xlab = "Species", col = "steelblue")
+hist(data$Endemics, main = "Endemics", xlab = "Endemics", col = "steelblue")
+hist(data$Area, main = "Area", xlab = "Area", col = "steelblue")
+hist(data$Elevation, main = "Elevation", xlab = "Elevation", col = "steelblue")
+hist(data$Nearest, main = "Nearest", xlab = "Nearest", col = "steelblue")
+hist(data$Scruz, main = "Scruz", xlab = "Scruz", col = "steelblue")
+hist(data$Adjacent, main = "Adjacent", xlab = "Adjacent", col = "steelblue")
+hist(data$E_Ratio, main = "E_Ratio", xlab = "E_Ratio", col = "steelblue")
+```
+
+왼쪽으로 데이터들이 몰려있음(Right-Skewed) -> 로그 변환의 필요성
+또한 이론상으로 종-면적 관계(Species-Area Relationship)는 $S = cA^z$ (S: 종의 수, A: 면적)를 따르는데, 양 변에 로그를 취해줬을 때 선형관계를 보임.(로그 변환의 이론적 타당성)
+
+### 기존 vs log 변환
+```{r}
+par(mfrow = c(1, 2))
+plot(data$Area, data$Species, main = "원본 데이터 (Species vs Area)",
+     xlab = "Area", ylab = "Species", pch = 19)
+abline(lm(Species ~ Area, data = data), col = "red", lwd = 2)
+plot(log(data$Area), log(data$Species), main = "로그 변환 (log(Species) vs log(Area))",
+     xlab = "log(Area)", ylab = "log(Species)", pch = 19)
+abline(lm(log(Species) ~ log(Area), data = data), col = "blue", lwd = 2)
+```
+로그 변환시 선형 관계가 뚜렷해짐
+
+
+### 상관관계 확인
+```{r}
+par(mfrow = c(1, 1))
+numeric_vars <- c("Species", "Endemics", "Area", "Elevation", "Nearest", "Scruz", "Adjacent", "E_Ratio")
+cor_matrix <- cor(data[, numeric_vars], use = "complete.obs")
+print(round(cor_matrix, 2))
+corrplot(cor_matrix, method = "number", type = "lower", tl.col = "black")
+```
+
+주목할만한 사실
+- Area vs Elevation (0.75): 섬의 면적이 넓을수록 고도도 높은 경향을 보임-> 다중공선성의 위험
+
+- log_Scruz vs log_Nearest(0.62): 고립을 측정하는 유사한 역할을 하고 있음을 보여줌
+
+- 고도가 높을수록 고유종의 수, 총 종의 수가 많음
+
+- E_Ratio vs Species (-0.55), Elevation (-0.42): 총 종의 수가 많을수록, 고도가 높을수록 전체에서 고유종이 차지하는 비율(E_Ratio)은 오히려 낮아짐-> 면적이 크고 고도가 높은 섬(Isabela, SantaCruz 등)이 더 많은 종(Species)을 가지지만, 동시에 외부에서 유입되는 비고유종도 더 많이 받아들여서, 상대적으로 '고유종의 비율'은 낮아질 수 있음을 시사함.
+
+
+### A. E_RATIO 모델
+```{r}
+fit <- lm(E_Ratio ~  Area + Elevation + Nearest + Scruz + Adjacent, data=data)
+summary(fit)
+```
+통계적으로 유의X(각 변수 모두), 설명력도 크게 부족함
+
+
+### B. Elevation 제외 모델
+```{r}
+fit2 <- lm(Species ~ Area + Nearest + Scruz + Adjacent, data = data)
+summary(fit2)
+```
+p-value(0.007)로 유의함. 변수 중에는 Area만 강하게 유의해 종의 수 예측에 핵심적인 변수로 작용함을 보여줌. 다만 설명력이 여전히 낮고, 잔차가 0을 기준으로 대칭적이지 않고, 오른쪽으로 심하게 치우쳐 잔차 정규성/등분산성을 크게 위반하는 것으로 보임. -> 모델 신뢰가 어려움.
+
+### C 다중공선성
+```{r}
+fit_full <- lm(Species ~ Area + Elevation + Nearest + Scruz + Adjacent, data = data)
+vif(fit_full)
+```
+Area, Elevation의 VIF 값이 높음. 두 변수를 처리하는 방식에 대해 고민해 볼 필요가 있음(제거 OR 새로운 변수 생성 등을 고려)
+
+### D 단계별 변수 선택법
+```{r}
+fit_stepwise <- step(fit_full, direction = "both")
+summary(fit_stepwise)
+```
+Species ~ Elevation + Adjacent 일 때 가장 좋은 성능이 나오고, 실제 모델 적합 결과 통계적으로 유의할 뿐 아니라 기존 모델보다 설명력이 월등히 상승(71.8%)
+다만 여전히 잔차가 대칭을 이루지 않고, 오른쪽으로 쏠려 있음 -> 원본 데이터의 값의 문제이므로 로그 변환의 필요를 보여주는 결과
+
+### E(B문제도) 문제는 교수님께 답변 받은 후에 추가하도록 하겠습니다.
+
+
+### log 변환
+```{r}
+data_log <- data
+
+data_log$log_Species <- log(data_log$Species)
+data_log$log_Area <- log(data_log$Area)
+data_log$log_Elevation <- log(data_log$Elevation)
+data_log$log_Nearest <- log(data_log$Nearest)
+data_log$log_Scruz <- log(data_log$Scruz + 1)
+data_log$log_Adjacent <- log(data_log$Adjacent)
+
+par(mfrow = c(3, 3))
+hist(data_log$log_Species, main = "log(Species)", xlab = "log(Species)", col = "lightblue")
+hist(data_log$log_Area, main = "log(Area)", xlab = "log(Area)", col = "lightblue")
+hist(data_log$log_Elevation, main = "log(Elevation)", xlab = "log(Elevation)", col = "lightblue")
+hist(data_log$log_Nearest, main = "log(Nearest)", xlab = "log(Nearest)", col = "lightblue")
+hist(data_log$log_Scruz, main = "log(Scruz)", xlab = "log(Scruz)", col = "lightblue")
+hist(data_log$log_Adjacent, main = "log(Adjacent)", xlab = "log(Adjacent)", col = "lightblue")
+hist(data$Endemics, main = "Endemics (Original)", xlab = "Endemics", col = "gray")
+hist(data$E_Ratio, main = "E_Ratio (Original)", xlab = "E_Ratio", col = "gray")
+```
+
+
+### log 변환 후 변수 간 상관관계
+```{r}
+log_vars <- c("log_Species", "log_Area", "log_Elevation", 
+              "log_Nearest", "log_Scruz", "log_Adjacent", 
+              "E_Ratio") 
+cor_matrix_log <- cor(data_log[, log_vars], use = "complete.obs")
+
+print(round(cor_matrix_log, 2))
+par(mfrow = c(1, 1))
+corrplot(cor_matrix_log, method = "number", type = "lower", tl.col = "black")
+```
+
+로그 변환을 통해 변수 간의 관계의 선형성이 크게 증가했음을 확인할 수 있음. 다만 다중공선성 문제가 크게 발생하므로 해결의 필요성이 증가함.
+
+
+### log 변환 모델
+```{r}
+fit_log_model <- lm(log_Species ~ log_Area + log_Elevation + log_Nearest + log_Scruz + log_Adjacent,
+                    data = data_log)
+summary(fit_log_model)
+vif(fit_log_model)
+```
+설명력이 상승하고, 잔차도 대칭을 이루는 것을 확인할 수 있음. 다만 여전히 다중공선성 문제가 크게 나타남.(계수의 p-value로도 확인 가능)
+
+### 모델 진단
+```{r}
+par(mfrow = c(2, 2)) 
+plot(fit_log_model)
+```
+
+### 최종 모델 선정 (추가적인 실험이 필요할 것 같아서 실험 이후 표로 정리해서 첨부드리겠습니다.)
+```{r}
+log_step_fit <- step(fit_log_model, direction="both")
+summary(log_step_fit)
+```
+log_Species ~ log_Area + log_Scruz
+
+### 모델 진단
+```{r}
+par(mfrow = c(2, 2)) 
+plot(log_step_fit)
+```
+
+
+
+# 6.3
+## 목적
+어떤 거시 경제 지표가 미국의 총 고용자 수(Employed)를 가장 잘 설명하고 예측하는가?
+
+### 데이터 확인
+```{r}
+data(longley)
+str(longley)
+head(longley)
+summary(longley)
+```
+
+### 데이터 분포 확인
+```{r}
+summary(longley)
+par(mfrow = c(3, 3))
+hist(longley$Employed, main = "Employed", col = "steelblue")
+hist(longley$GNP.deflator, main = "GNP.deflator", col = "steelblue")
+hist(longley$GNP, main = "GNP", col = "steelblue")
+hist(longley$Unemployed, main = "Unemployed", col = "steelblue")
+hist(longley$Armed.Forces, main = "Armed.Forces", col = "steelblue")
+hist(longley$Population, main = "Population", col = "steelblue")
+hist(longley$Year, main = "Year", col = "steelblue")
+```
+
+시간에 따라 추세를 가지고 증감의 형태를 보였을 것이기에 다중공선성 문제가 크게 발생할 수 있음.
+
+
+### A 다중회귀모형
+```{r}
+fit_a_full <- lm(Employed ~ ., data = longley)
+summary(fit_a_full)
+```
+통계적으로 유의하고, 설명력이 99.25%로 상당히 높음. 다만 개별 변수의 P-value를 확인하면 영향력이 이상하게 표기됨 -> 심각한 다중공선성 문제를 보여줌.(통계치 왜곡)
+
+
+### B 설명변수 간 상관관계
+```{r}
+par(mfrow = c(1, 1))
+x_vars <- longley[, -which(names(longley) == "Employed")]
+cor_matrix_longley <- cor(x_vars)
+print(round(cor_matrix_longley, 3))
+corrplot(cor_matrix_longley, method = "number", type = "lower", tl.col = "black")
+```
+
+GNP, Year, Population은 거의 동일한 변수로 볼 수 있음 -> Employed의 증가 원인을 확실히 찾을 수 없음. 
+
+### C VIF 
+```{r}
+vif(fit_a_full)
+```
+Armed.Forces를 제외한 모든 변수가 VIF 10을 훨씬 초과함. 특히 GNP, Year, Population 변수는 VIF 값이 상당히 큼 -> 모델의 모순점을 설명해주는 결과(설명력은 높은데 몇몇 변수가 유의하지 않게 나타나는 부분)
+
+### D 단계별 변수 선택법 (최종 선택 모델)
+```{r}
+fit_d_stepwise <- step(fit_a_full, direction = "both")
+summary(fit_d_stepwise)
+```
+Employed ~ GNP + Unemployed + Armed.Forces + Year
+중복되는 변수를 제거하여 설명력이 더 높아졌고, 계수의 정상화를 확인할 수 있음
+
+### 모델 진단
+```{r}
+par(mfrow = c(2, 2))
+plot(fit_d_stepwise)
+```
+
+### E GNP에 대한 회귀계수
+```{r}
+summary_a <- summary(fit_d_stepwise)
+print(summary_a$coefficients["GNP", ])
+```
+첫 모델에 대해서 유의하지 않던 GNP는 VIF 제거 이후 GNP의 P-value는 0.032로 유의해짐
+
+### F Unemployed & Armed Forces에 대한 회귀계수가 모두 0인 귀무가설
+```{r}
+fit_f_reduced <- lm(Employed ~ GNP.deflator + GNP + Population + Year, 
+                    data = longley)
+anova_result <- anova(fit_f_reduced, fit_a_full)
+print(anova_result)
+```
+p-value = 0.002394로 귀무가설을 기각함 -> 두 변수는 공동으로 유의미하며 제거하면 안됨

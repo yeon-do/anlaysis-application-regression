@@ -1,0 +1,173 @@
+---
+title: "5.5 회귀진단 후 보정방법"
+author: "박도연"
+date: "2025-10-30"
+output: html_document
+---
+
+### 문제 5.3
+#### 분석 목적
+: "Fertility(출산율)"에 영향을 미치는 사회·경제적 요인들을 통계적으로 분석하고, 각 변수(농업 비율, 교육 수준, 카톨릭 인구 비율, 영아 사망률 등)와의 관계를 파악하고자 함.
+
+#0 DATA 구조 및 요약
+```{r}
+data(swiss)
+str(swiss)
+
+summary(swiss)
+```
+
+
+#0 변수별 시각화
+```{r}
+hist(swiss$Fertility, main="Fertility 분포", xlab="Fertility")
+
+boxplot(swiss, main="swiss 데이터 변수별 Boxplot", las=2)
+
+pairs(swiss)
+```
+
+#0 변수간 상관관계
+```{r}
+cor_matrix <- cor(swiss)
+print(cor_matrix)
+```
+Agriculture와 Education: -0.6395로 강한 음의 상관관계  
+Examination과 Education: 0.6984로 강한 양의 상관관계  
+Examination과 Catholic: -0.5727로 뚜렷한 음의 상관관계를 보임.
+
+
+#선형회귀모형 적합
+```{r}
+fit <- lm(Fertility ~ ., data=swiss)
+summary(fit)
+```
+Fertility=66.91518−0.17211×Agriculture−0.25801×Examination−0.87094×Education+0.10412×Catholic+1.07705×Infant.Mortality  
+유의수준 0.05에서 유의함 
+
+#a 등분산성 점검
+```{r}
+plot(fit$fitted.values, fit$residuals,
+     xlab="Fitted values", ylab="Residuals", main="Residuals vs Fitted")
+abline(h=0, col="red")
+```
+
+잔차가 특정 구간에 몰리지 않고 전체 fitted 값 범위에서 비교적 고르게 분포하므로 대체로 등분산성 가정이 충족됨.
+
+#b 정규성 점검
+```{r}
+qqnorm(fit$residuals)
+qqline(fit$residuals, col="red")
+
+shapiro.test(fit$residuals)
+```
+q-q plot 정규분포 잘 따르고 있음.  
+shapiro-test p-value:0.9318>0.05 귀무가설(잔차가 정규분포를 따른다) 기각 x
+
+#c leverage point
+```{r}
+leverage <- hatvalues(fit)
+plot(leverage, type="h", main="Leverage Plot")
+which(leverage > 2*ncol(swiss)/nrow(swiss))
+```
+La Vallee(19), V.De Geneve(45)
+
+#d outlier
+```{r}
+rstudent <- rstudent(fit)
+plot(rstudent, main="Standardized residuals")
+which(abs(rstudent) > 2)
+```
+Porrentruy(6), Sierre(37), Rive Gauche(47)
+
+#e influential point
+```{r}
+cooks <- cooks.distance(fit)
+plot(cooks, type="h", main="Cook's Distance")
+which(cooks > 0.5)
+```
+명확한 영향점은 보이지 않음.
+  
+#f 회귀식 적합
+```{r}
+summary(fit)
+library(car)
+vif(fit)
+```
+전체적으로 유의한 모델임.  
+다만 각 변수를 쪼개서 봤을 때 examination 변수는 유의하지 않음.   
+다중공선성은 x
+
+#f 추가 작업-examination 제외한 모델
+```{r}
+fit2 <- lm(Fertility ~ Agriculture + Education + Catholic + Infant.Mortality, data=swiss)
+summary(fit2)
+```
+전체 유의성이 조금 더 상승. 모형 해석이 보다 명확해짐을 알 수 있음.
+
+
+### 문제 5.4
+```{r setup, include=FALSE}
+library(readxl)
+data <- read_excel("table4.4_cholesterol.xlsx") 
+```
+문제 4.1의 표 및 결과 참고
+
+  
+#선형회귀모형 적합
+```{r}
+model <- lm(y ~ x1 + x2, data=data)
+summary(model)
+```
+Cholesterol=77.98+0.42⋅Weight+5.22⋅Age  
+유의수준 0.05에서 유의함 
+
+#a 등분산성 점검
+```{r}
+plot(model$fitted.values, model$residuals,
+     xlab="Fitted values", ylab="Residuals", main="Residuals vs Fitted")
+abline(h=0, col="red")
+```
+
+잔차가 특정 구간에 몰리지 않고 전체 fitted 값 범위에서 비교적 고르게 분포하므로 대체로 등분산성 가정이 충족됨.
+
+#b 정규성 점검
+```{r}
+qqnorm(model$residuals)
+qqline(model$residuals, col="red")
+
+shapiro.test(model$residuals)
+```
+q-q plot 정규분포 잘 따르고 있음.  
+shapiro-test p-value:0.6588>0.05 귀무가설(잔차가 정규분포를 따른다) 기각 x
+
+#c leverage point
+```{r}
+leverage <- hatvalues(model)
+which(leverage > 2*ncol(data)/nrow(data))
+plot(leverage, type="h", main="Leverage Values")
+```
+환자 11
+
+#d outlier
+```{r}
+rstudent <- rstudent(model)
+which(abs(rstudent) > 2)
+plot(rstudent, main="Standardized residuals")
+```
+환자 8
+
+#e influential point
+```{r}
+cooks <- cooks.distance(model)
+which(cooks > 0.5)
+plot(cooks, type="h", main="Cook's Distance")
+```
+명확한 영향점은 보이지 않음.
+
+#f 회귀식 적합
+```{r}
+summary(model)
+vif(model)
+```
+전체적으로 유의함. 다만 나이(x2, p < 0.001)는 명확하게 유의하나, 몸무게(x1, p = 0.573)는 유의하지 않으므로 몸무게는 예측에 기여가 크지 않을 수 있음.
